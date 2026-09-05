@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment & secrets (`.env.example` stays committed)
+.env
+.env.local
+.env.*.local
+
+# Frontend (Steps 6–8)
+node_modules/
+frontend/dist/
+playwright-report/
+test-results/
+
+# Backups (Step 9)
+backups/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store

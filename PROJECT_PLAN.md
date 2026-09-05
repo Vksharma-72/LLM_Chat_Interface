@@ -4,7 +4,7 @@
 sections of this file. Any agent implementing a step MUST read this file fully first, implement
 ONLY that step, run the step's TEST GATE, and update the §Progress Tracker when the gate passes.
 
-- **Workspace:** `/home/vk/Desktop/LLM Chat Interface` (path contains a space — always quote it)
+- **Workspace:** `/home/vk/Desktop/LLM_Chat_Interface` (path contains a space — always quote it)
 - **Python:** uv-managed `.venv` at the workspace root (Python 3.11.14) — already created
 - **Goal:** multi-user ChatGPT-style web app in front of a local llama.cpp server
   (Ornithopter 35B via Llama-GUI, OpenAI-compatible API), exposed through the owner's own
@@ -375,7 +375,7 @@ Agents: update this table after each green gate.
 |---|---|---|---|
 | 1 — Scaffold, tooling & services | done | 2026-09-05 | PostgreSQL 16 + Redis 7 installed (apt); role/db `llmchat`+`llmchat_test` created; uv deps + lock; app factory with CORS, JSON request-ID logging, `/health`. Gate green: pytest 5 passed, `/health` 200 on :3001, ruff clean, `pg_isready` + `redis-cli ping` OK |
 | 2 — Database layer | done | 2026-09-05 | 5 models per §6 (UUID PKs, timestamptz, cascades, indexes), async engine/sessionmaker, Alembic async env (reads app config; `-x db=test`), initial migration `5aa2aa03baa3` applied to BOTH DBs, typed repositories + usage upsert. Gate green: alembic upgrade head OK ×2, FULL pytest 31 passed, ruff clean |
-| 3 — Auth & users | not started | — | |
+| 3 — Auth & users | done | 2026-09-06 | security.py (bcrypt + JWT access/refresh w/ jti+type claims), auth routes (register/login/refresh rotation/logout/me), users routes (profile, password change, 30-day zero-filled usage), error envelope everywhere, Redis-backed login limiter (5/15min per IP+identifier), FIRST_USER_IS_ADMIN. Gate green: FULL pytest 56 passed (limiter vs real Redis), ruff clean |
 | 4 — LLM gateway + mock | not started | — | |
 | 5 — Conversations + chat API | not started | — | |
 | 6 — Frontend scaffold + auth | not started | — | |

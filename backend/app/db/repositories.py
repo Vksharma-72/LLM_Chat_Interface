@@ -55,6 +55,10 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.username == username))
         return result.scalar_one_or_none()
 
+    async def touch_last_login(self, user: User) -> None:
+        user.last_login = utcnow()
+        await self.session.flush()
+
 
 class ConversationRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -193,6 +197,12 @@ class ApiUsageRepository:
             .execution_options(populate_existing=True)
         )
         return result.scalar_one()
+
+    async def list_for_user_since(self, user_id: uuid.UUID, start: date) -> list[ApiUsage]:
+        result = await self.session.execute(
+            select(ApiUsage).where(ApiUsage.user_id == user_id, ApiUsage.date >= start)
+        )
+        return list(result.scalars().all())
 
 
 class RefreshTokenRepository:

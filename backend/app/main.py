@@ -33,6 +33,7 @@ from app.api.routes.conversations import router as conversations_router
 from app.api.routes.health import router as health_router
 from app.api.routes.users import router as users_router
 from app.core.config import ROOT_DIR, Settings, get_settings
+from app.core.http_security import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.logging import RequestIDMiddleware, configure_logging
 from app.db.session import get_engine
 
@@ -97,6 +98,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RequestIDMiddleware)
+    # Applied first (outermost) so hardening headers land on every response,
+    # including errors emitted by the inner stack.
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
 
     app.include_router(health_router)
     app.include_router(auth_router)

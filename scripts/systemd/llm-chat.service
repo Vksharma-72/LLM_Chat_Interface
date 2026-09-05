@@ -1,0 +1,21 @@
+[Unit]
+Description=LLM Chat Interface (FastAPI + built frontend, single origin :3001)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Desktop/LLM_Chat_Interface
+# Apply pending migrations, then serve. APP_ENV=production gates env-specific behavior.
+Environment=APP_ENV=production
+ExecStartPre=/bin/bash -c 'cd %h/Desktop/LLM_Chat_Interface/backend && %h/.local/bin/uv run alembic upgrade head'
+ExecStart=%h/.local/bin/uv run --no-sync uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 3001
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

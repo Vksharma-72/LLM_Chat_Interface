@@ -133,14 +133,16 @@ async def export_conversation(
     conversation = await _get_owned_conversation(conversation_id, user, db)
     messages = await MessageRepository(db).list_for_conversation(conversation_id)
 
+    message_payloads = []
+    for message in messages:
+        payload_message = MessageResponse.from_model(message).model_dump(mode="json")
+        message_payloads.append(payload_message)
+
     if format == "json":
         payload = {
             "title": conversation.title,
             "exported_at": datetime.now(UTC).isoformat(),
-            "messages": [
-                MessageResponse.from_model(message).model_dump(mode="json")
-                for message in messages
-            ],
+            "messages": message_payloads,
         }
         content = json.dumps(payload, ensure_ascii=False, indent=2)
         media_type = "application/json"
@@ -151,6 +153,13 @@ async def export_conversation(
         for message in messages:
             lines.append(f"**{role_labels.get(message.role, message.role)}:**")
             lines.append(message.content)
+            for attachment in message.__dict__.get("attachments") or []:
+                if attachment.kind == "image":
+                    lines.append(
+                        f"![{attachment.filename}](/api/attachments/{attachment.id}/content)"
+                    )
+                else:
+                    lines.append(f"\U0001f4ce {attachment.filename} ({attachment.kind})")
             lines.append("")
         content = "\n".join(lines)
         media_type = "text/markdown; charset=utf-8"

@@ -39,3 +39,6 @@ class Message(Base):
     conversation: Mapped["Conversation"] = relationship(  # noqa: F821
         back_populates="messages", passive_deletes=True
     )
+    attachments: Mapped[list["Attachment"]] = relationship(  # noqa: F821
+        back_populates="message", passive_deletes=True
+    )

@@ -62,10 +62,17 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: int = 120
     LLM_MAX_CONCURRENT: int = 2
     LLM_LIVE_TEST: bool = False
+    LLM_VISION_ENABLED: bool = True
+
+    # --- File attachments ---
+    UPLOAD_DIR: str = "uploads"
+    UPLOAD_MAX_FILE_MB: int = 100
+    DOC_MAX_CHARS: int = 100_000
 
     # --- Mock LLM server ---
     MOCK_LLM_PORT: int = 8001
     MOCK_LLM_REPLY: str = "This is a mock reply from the mock LLM server."
+    MOCK_VISION_REPLY: str = "I can see the image."
     MOCK_LLM_LATENCY_MS: int = 0
     MOCK_LLM_CHUNKS: int = 12
 

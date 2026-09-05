@@ -14,9 +14,17 @@ from typing import Any
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.base import utcnow
-from app.models import ApiUsage, Conversation, Message, RefreshToken, User
+from app.models import (
+    ApiUsage,
+    Attachment,
+    Conversation,
+    Message,
+    RefreshToken,
+    User,
+)
 
 
 def _utc_today() -> date:
@@ -181,13 +189,22 @@ class MessageRepository:
         return message
 
     async def list_for_conversation(self, conversation_id: uuid.UUID) -> list[Message]:
-        """Messages ordered by created_at ascending (§7)."""
+        """Messages ordered by created_at ascending (§7), with attachments loaded."""
         result = await self.session.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)
+            .options(selectinload(Message.attachments))
             .order_by(Message.created_at.asc())
         )
         return list(result.scalars().all())
+
+    async def get_with_attachments(self, message_id: uuid.UUID) -> Message | None:
+        result = await self.session.execute(
+            select(Message)
+            .where(Message.id == message_id)
+            .options(selectinload(Message.attachments))
+        )
+        return result.scalar_one_or_none()
 
     async def delete_message(self, message: Message) -> None:
         await self.session.delete(message)
@@ -263,3 +280,43 @@ class RefreshTokenRepository:
             .returning(RefreshToken.id)
         )
         return result.scalar_one_or_none() is not None
+
+
+class AttachmentRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create(self, **kwargs: Any) -> Attachment:
+        attachment = Attachment(**kwargs)
+        self.session.add(attachment)
+        await self.session.flush()
+        return attachment
+
+    async def get(self, attachment_id: uuid.UUID) -> Attachment | None:
+        result = await self.session.execute(
+            select(Attachment).where(Attachment.id == attachment_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_for_user(
+        self, attachment_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Attachment | None:
+        result = await self.session.execute(
+            select(Attachment).where(
+                Attachment.id == attachment_id, Attachment.user_id == user_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_unbound_for_user(
+        self, attachment_ids: Sequence[uuid.UUID], user_id: uuid.UUID
+    ) -> list[Attachment]:
+        """Attachments owned by the user that are not yet bound to a message."""
+        result = await self.session.execute(
+            select(Attachment).where(
+                Attachment.id.in_(attachment_ids),
+                Attachment.user_id == user_id,
+                Attachment.message_id.is_(None),
+            )
+        )
+        return list(result.scalars().all())

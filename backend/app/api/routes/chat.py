@@ -17,14 +17,16 @@ from app.core.config import get_settings
 from app.core.limiter import api_limit, chat_limit, limiter, user_key
 from app.db.repositories import (
     ApiUsageRepository,
+    AttachmentRepository,
     ConversationRepository,
     MessageRepository,
 )
 from app.db.session import get_sessionmaker
-from app.models import Conversation, Message, User
+from app.models import Attachment, Conversation, Message, User
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ModelsResponse, StatusResponse
 from app.schemas.conversation import ConversationResponse
 from app.schemas.message import MessageResponse
+from app.services.attachments import build_llm_messages
 from app.services.llm import (
     LLMBadResponse,
     LLMRateLimited,
@@ -38,19 +40,26 @@ DEFAULT_TEMPERATURE = 0.7
 DEFAULT_MAX_TOKENS = 1024
 
 
-def _auto_title(content: str) -> str:
-    """First ~60 chars of the first user message (§7)."""
-    flattened = " ".join(content.split())
-    return flattened[:60] or "New Conversation"
+def _auto_title(content: str | None, attachments: list[Attachment]) -> str:
+    """First ~60 chars of the first user message, else the attachment name (§7/§15)."""
+    if content and content.strip():
+        return " ".join(content.split())[:60]
+    for attachment in attachments:
+        icon = "📷" if attachment.kind == "image" else "📎"
+        return f"{icon} {attachment.filename}"[:60]
+    return "New Conversation"
+
+
+def _has_images(attachments: list[Attachment]) -> bool:
+    return any(attachment.kind == "image" for attachment in attachments)
 
 
 async def _prepare_exchange(
     db: AsyncSession, user: User, body: ChatSendRequest
-) -> tuple[Conversation, Message]:
-    """Resolve/create the conversation, persist the user message, and commit.
-
-    Committing here means a later LLM failure keeps the user message (§7).
-    """
+) -> tuple[Conversation, Message, list[Attachment]]:
+    """Resolve/create the conversation, persist the user message, bind any
+    attachments, and commit. Committing here means a later LLM failure keeps
+    the user message (§7)."""
     conv_repo = ConversationRepository(db)
     if body.conversation_id is not None:
         conversation = await conv_repo.get(body.conversation_id)
@@ -58,7 +67,17 @@ async def _prepare_exchange(
             raise ApiError(404, "not_found", "Conversation not found")
     else:
         conversation = await conv_repo.create(user.id, model=body.model)
-        conversation.title = _auto_title(body.content)
+
+    attachments: list[Attachment] = []
+    if body.attachment_ids:
+        attachments = await AttachmentRepository(db).get_unbound_for_user(
+            body.attachment_ids, user.id
+        )
+        if len(attachments) != len(set(body.attachment_ids)):
+            raise ApiError(404, "not_found", "One or more attachments not found")
+
+    if body.conversation_id is None:
+        conversation.title = _auto_title(body.content, attachments)
 
     requested = {
         "temperature": body.temperature,
@@ -68,11 +87,19 @@ async def _prepare_exchange(
     user_message = await MessageRepository(db).append(
         conversation.id,
         role="user",
-        content=body.content,
+        content=body.content or "",
         metadata={key: value for key, value in requested.items() if value is not None},
     )
+    for attachment in attachments:
+        attachment.message_id = user_message.id
+        attachment.conversation_id = conversation.id
     await db.commit()
-    return conversation, user_message
+    if attachments:
+        user_message = (
+            await MessageRepository(db).get_with_attachments(user_message.id)
+            or user_message
+        )
+    return conversation, user_message, attachments
 
 
 def _llm_failure(exc: Exception) -> ApiError:
@@ -120,8 +147,9 @@ async def _persist_assistant(
 
 async def _prepare_regeneration(
     db: AsyncSession, user: User, body: ChatSendRequest
-) -> tuple[Conversation, Message, str]:
-    """Drop the trailing assistant reply; return the last user message as prompt."""
+) -> tuple[Conversation, Message, list[dict], list[dict] | None]:
+    """Drop the trailing assistant reply; rebuild the prompt (with attachments)
+    from the last user message so regenerate re-sends exactly what was sent."""
     assert body.conversation_id is not None  # guaranteed by ChatSendRequest
     conversation = await ConversationRepository(db).get(body.conversation_id)
     if conversation is None or conversation.user_id != user.id:
@@ -137,7 +165,13 @@ async def _prepare_regeneration(
     last_user = next((m for m in reversed(messages) if m.role == "user"), None)
     if last_user is None:
         raise ApiError(422, "validation_error", "Nothing to regenerate")
-    return conversation, last_user, last_user.content
+    prompt_messages = build_llm_messages(last_user.content, last_user.attachments)
+    fallback = (
+        build_llm_messages(last_user.content, last_user.attachments, include_images=False)
+        if _has_images(last_user.attachments)
+        else None
+    )
+    return conversation, last_user, prompt_messages, fallback
 
 
 def _stream_error(code: str, message: str) -> dict[str, str]:
@@ -157,20 +191,42 @@ async def send_message(
         raise ApiError(
             422, "validation_error", "Regeneration is only supported on /api/chat/stream"
         )
-    conversation, user_message = await _prepare_exchange(db, user, body)
+    conversation, user_message, attachments = await _prepare_exchange(db, user, body)
     temperature = body.temperature if body.temperature is not None else DEFAULT_TEMPERATURE
     max_tokens = body.max_tokens if body.max_tokens is not None else DEFAULT_MAX_TOKENS
 
+    prompt_messages = build_llm_messages(body.content, attachments)
+    fallback_messages = (
+        build_llm_messages(body.content, attachments, include_images=False)
+        if _has_images(attachments)
+        else None
+    )
     try:
         result = await service.chat_completion(
-            [{"role": "user", "content": body.content or ""}],
+            prompt_messages,
             model=body.model,
             temperature=temperature,
             max_tokens=max_tokens,
             system_prompt=body.system_prompt,
         )
-    except (LLMRateLimited, LLMBadResponse, LLMUnavailable) as exc:
+    except LLMBadResponse as exc:
+        # non-vision upstream rejected the image parts → retry text-only
+        if fallback_messages is None:
+            raise _llm_failure(exc) from exc
+        try:
+            result = await service.chat_completion(
+                fallback_messages,
+                model=body.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system_prompt=body.system_prompt,
+            )
+        except (LLMRateLimited, LLMBadResponse, LLMUnavailable) as retry_exc:
+            raise _llm_failure(retry_exc) from retry_exc
+    except (LLMRateLimited, LLMUnavailable) as exc:
         raise _llm_failure(exc) from exc
+
+    persisted = await MessageRepository(db).get_with_attachments(user_message.id)
 
     assistant_message = await _persist_assistant(
         db,
@@ -186,7 +242,7 @@ async def send_message(
     await db.refresh(conversation)
     return ChatSendResponse(
         conversation=ConversationResponse.from_model(conversation),
-        user_message=MessageResponse.from_model(user_message),
+        user_message=MessageResponse.from_model(persisted or user_message),
         assistant_message=MessageResponse.from_model(assistant_message),
     )
 
@@ -201,10 +257,17 @@ async def stream_message(
     service=Depends(get_llm_service),
 ) -> EventSourceResponse:
     if body.regenerate:
-        conversation, user_message, prompt_content = await _prepare_regeneration(db, user, body)
+        conversation, user_message, prompt_messages, fallback_messages = (
+            await _prepare_regeneration(db, user, body)
+        )
     else:
-        conversation, user_message = await _prepare_exchange(db, user, body)
-        prompt_content = body.content or ""
+        conversation, user_message, attachments = await _prepare_exchange(db, user, body)
+        prompt_messages = build_llm_messages(body.content, attachments)
+        fallback_messages = (
+            build_llm_messages(body.content, attachments, include_images=False)
+            if _has_images(attachments)
+            else None
+        )
     temperature = body.temperature if body.temperature is not None else DEFAULT_TEMPERATURE
     max_tokens = body.max_tokens if body.max_tokens is not None else DEFAULT_MAX_TOKENS
 
@@ -214,7 +277,8 @@ async def stream_message(
             user.id,
             conversation,
             user_message,
-            prompt_content,
+            prompt_messages,
+            fallback_messages,
             body,
             temperature,
             max_tokens,
@@ -227,7 +291,8 @@ async def _chat_stream_events(
     user_id: uuid.UUID,
     conversation: Conversation,
     user_message: Message,
-    prompt_content: str,
+    prompt_messages: list[dict],
+    fallback_messages: list[dict] | None,
     body: ChatSendRequest,
     temperature: float,
     max_tokens: int,
@@ -247,62 +312,75 @@ async def _chat_stream_events(
         ),
     }
 
-    parts: list[str] = []
-    usage: dict[str, int] | None = None
-    model_used: str | None = body.model
-    session = get_sessionmaker()()
-    try:
-        async for event in service.chat_completion_stream(
-            [{"role": "user", "content": prompt_content}],
-            model=body.model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            system_prompt=body.system_prompt,
-        ):
-            if event["type"] == "delta":
-                parts.append(event["content"])
-                yield {
-                    "event": "delta",
-                    "data": json.dumps({"content": event["content"]}),
-                }
-            elif event["type"] == "usage":
-                usage = event["usage"]
-            elif event["type"] == "done":
-                model_used = event.get("model") or model_used
-                async with session.begin():
-                    assistant = await _persist_assistant(
-                        session,
-                        user_id,
-                        conversation.id,
-                        content="".join(parts),
-                        usage=usage,
-                        model=model_used or "unknown",
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        system_prompt=body.system_prompt,
-                    )
-                yield {
-                    "event": "done",
-                    "data": json.dumps(
-                        {
-                            "assistant_message": MessageResponse.from_model(
-                                assistant
-                            ).model_dump(mode="json"),
-                            "usage": usage,
-                        }
-                    ),
-                }
-            elif event["type"] == "error":
-                yield _stream_error(event["error"]["code"], event["error"]["message"])
-                return
-    except LLMRateLimited as exc:
-        yield _stream_error("llm_rate_limited", str(exc))
-        return
-    except (LLMBadResponse, LLMUnavailable) as exc:
-        yield _stream_error("llm_unavailable", str(exc))
-        return
-    finally:
-        await session.close()
+    attempts: list[list[dict]] = [prompt_messages]
+    if fallback_messages is not None:
+        attempts.append(fallback_messages)  # non-vision retry without image parts
+
+    for attempt_index, attempt_messages in enumerate(attempts):
+        parts: list[str] = []
+        usage: dict[str, int] | None = None
+        model_used: str | None = body.model
+        session = get_sessionmaker()()
+        try:
+            async for event in service.chat_completion_stream(
+                attempt_messages,
+                model=body.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                system_prompt=body.system_prompt,
+            ):
+                if event["type"] == "delta":
+                    parts.append(event["content"])
+                    yield {
+                        "event": "delta",
+                        "data": json.dumps({"content": event["content"]}),
+                    }
+                elif event["type"] == "usage":
+                    usage = event["usage"]
+                elif event["type"] == "done":
+                    model_used = event.get("model") or model_used
+                    async with session.begin():
+                        assistant = await _persist_assistant(
+                            session,
+                            user_id,
+                            conversation.id,
+                            content="".join(parts),
+                            usage=usage,
+                            model=model_used or "unknown",
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            system_prompt=body.system_prompt,
+                        )
+                    yield {
+                        "event": "done",
+                        "data": json.dumps(
+                            {
+                                "assistant_message": MessageResponse.from_model(
+                                    assistant
+                                ).model_dump(mode="json"),
+                                "usage": usage,
+                            }
+                        ),
+                    }
+                    return
+                elif event["type"] == "error":
+                    if (
+                        attempt_index < len(attempts) - 1
+                        and event["error"]["code"] == "llm_unavailable"
+                    ):
+                        break  # retry text-only without image parts
+                    yield _stream_error(event["error"]["code"], event["error"]["message"])
+                    return
+        except LLMRateLimited as exc:
+            yield _stream_error("llm_rate_limited", str(exc))
+            return
+        except (LLMBadResponse, LLMUnavailable) as exc:
+            if attempt_index < len(attempts) - 1:
+                continue
+            yield _stream_error("llm_unavailable", str(exc))
+            return
+        finally:
+            await session.close()
 
 
 @router.get("/models", response_model=ModelsResponse)

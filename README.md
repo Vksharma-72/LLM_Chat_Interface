@@ -84,6 +84,11 @@ python3 -c "import secrets; print(secrets.token_hex(32))"   # → JWT_SECRET
 | `MOCK_LLM_REPLY` | `This is a mock reply…` | mock reply text |
 | `MOCK_LLM_LATENCY_MS` | `0` | mock artificial latency |
 | `MOCK_LLM_CHUNKS` | `12` | mock streaming chunk count |
+| `UPLOAD_DIR` | `uploads` | attachment storage root |
+| `UPLOAD_MAX_FILE_MB` | `100` | per-file upload cap |
+| `DOC_MAX_CHARS` | `100000` | extracted document text limit |
+| `LLM_VISION_ENABLED` | `true` | send images to the LLM (disable for text-only models) |
+| `MOCK_VISION_REPLY` | `I can see the image.` | mock reply when an image part is present |
 
 ---
 
@@ -146,6 +151,16 @@ journalctl --user -u llm-chat -f          # JSON logs live here
 The unit applies migrations on start (`alembic upgrade head`) and restarts on
 failure. Adjust `WorkingDirectory` if the project lives elsewhere. For the
 service to keep running after logout: `loginctl enable-linger $USER`.
+
+## Attachments
+
+Users can attach images, videos, audio, and documents to chat messages (📎 in
+the chat input, drag-and-drop, or clipboard paste). Files are stored under
+`UPLOAD_DIR` (default `uploads/`, gitignored) and served only to their owner
+through an authenticated endpoint. Images are downscaled once for the vision
+prompt (`LLM_VISION_ENABLED=true` — your llama-server must have an mmproj
+loaded), and PDF/DOCX/text documents are extracted to text so the model can
+read them. Unbound uploads are cleaned up after 24 h.
 
 ## Testing
 

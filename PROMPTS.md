@@ -140,3 +140,30 @@ Implement ONLY Step 9 (production hardening & ops) per PROJECT_PLAN.md.
 
 TEST GATE (show outputs): FULL backend pytest green; vitest + Playwright green; smoke.sh passes; load test <1% errors with report; systemd-analyze verify OK; ruff clean. Then summarize what was built and how to run it. When done, update the §Progress Tracker in PROJECT_PLAN.md.
 ```
+
+---
+
+## Prompt 10 — Attachments backend
+
+```
+Read PROJECT_PLAN.md and PROMPTS.md first. Work only in /home/vk/Desktop/LLM_Chat_Interface. Implement ONLY Step 10 (attachments backend) per PROJECT_PLAN.md §Attachments Spec.
+1. attachments table per §15 (migration chained to 5aa2aa03baa3, applied to BOTH llmchat and llmchat_test); Attachment model + Message/User relationships.
+2. services/attachments.py: streaming upload with size cap, MIME+magic kind detection (blocked types -> 422 unsupported_file_type), Pillow model.jpg derivative, pypdf/python-docx/text extraction, build_llm_messages multimodal prompt builder (image_url parts gated by LLM_VISION_ENABLED, doc text, notes otherwise).
+3. POST /api/attachments (multipart, api_limit) + GET /{id} + GET /{id}/content (owner-scoped, inline/attachment disposition). BodySizeLimitMiddleware becomes path-aware (upload cap for /api/attachments).
+4. ChatSendRequest.attachment_ids; binding + ownership validation in _prepare_exchange; auto-title 📷/📎 fallback; send/stream/regenerate use build_llm_messages with automatic text-only retry on LLMBadResponse; MessageResponse.attachments via selectinload; export includes attachment links; daily orphan cleanup task.
+5. mock_llm_server: multimodal content + MOCK_VISION_REPLY when image parts present. tests/attachments/: upload kinds, caps, blocked types, ownership, binding, vision/document prompts (respx), regenerate, cascade, cleanup.
+
+TEST GATE (show outputs): alembic upgrade head OK on both DBs; FULL uv run pytest -q green; ruff clean; curl demo upload image -> send -> mock vision reply. No Step 11 until gate green. Update the §Progress Tracker.
+```
+
+## Prompt 11 — Attachments UI
+
+```
+Implement ONLY Step 11 (attachments UI) per PROJECT_PLAN.md §Attachments Spec.
+1. ChatInput: 📎 multi-file upload (sequential), drag-and-drop, clipboard paste for images, pending chips with remove, client size pre-check; onSend(content, attachmentIds).
+2. chatStore.send carries attachment_ids; optimistic temp message shows pending attachments; meta event swaps persisted ones (extend reducer + unit tests).
+3. MessageBubble: image thumbnails -> Lightbox (Esc/arrows), inline video/audio players, document/other download chips; auth-fetched blob URLs; friendlyError entries for payload_too_large / unsupported_file_type.
+4. tests: vitest units (reducer + chips); Playwright: upload PNG -> send -> vision reply + thumbnail; upload txt/doc -> reply references content; 375px regression.
+
+TEST GATE (show outputs): FULL backend pytest green; npx vitest run + Playwright green; npm run build ok; ruff clean. Update the §Progress Tracker.
+```

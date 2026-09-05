@@ -33,10 +33,29 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def _usage(body: dict[str, Any], reply: str) -> dict[str, int]:
-    prompt_tokens = sum(
-        _estimate_tokens(message.get("content", "")) for message in body.get("messages", [])
+def _message_text(message: dict) -> str:
+    """Content may be a plain string or OpenAI multimodal parts."""
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content
+    parts = []
+    for part in content if isinstance(content, list) else []:
+        if isinstance(part, dict) and part.get("type") == "text":
+            parts.append(str(part.get("text", "")))
+    return " ".join(parts)
+
+
+def _has_image_part(message: dict) -> bool:
+    content = message.get("content")
+    if not isinstance(content, list):
+        return False
+    return any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
     )
+
+
+def _usage(body: dict[str, Any], reply: str) -> dict[str, int]:
+    prompt_tokens = sum(_estimate_tokens(message) for message in body.get("messages", []))
     completion_tokens = _estimate_tokens(reply)
     return {
         "prompt_tokens": prompt_tokens,
@@ -94,6 +113,8 @@ async def chat_completions(request: Request) -> Any:
         await asyncio.sleep(settings.MOCK_LLM_LATENCY_MS / 1000)
 
     reply = settings.MOCK_LLM_REPLY
+    if any(_has_image_part(message) for message in body.get("messages", [])):
+        reply = settings.MOCK_VISION_REPLY
     model = body.get("model") or MOCK_MODEL_ID
 
     if body.get("stream"):

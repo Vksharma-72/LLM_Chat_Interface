@@ -23,6 +23,12 @@ test-results/
 # Backups (Step 9)
 backups/
 
+# Uploaded attachments (Step 10)
+uploads/
+
+# ZCode session artifacts
+.zcode/
+
 # Editors / OS
 .idea/
 .vscode/

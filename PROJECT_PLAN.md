@@ -367,6 +367,31 @@ backoff, only on `TimeoutException`/`ConnectError`/HTTP 5xx (never 4xx, never 42
   origin; SSE works through Cloudflare (no extra config). Set `APP_ENV=production`, real
   `JWT_SECRET`, `CORS_ORIGINS=https://your.host` (CORS is belt-and-braces; same-origin in prod).
 
+---
+
+## 15. Attachments Spec (Steps 10–11)
+
+- **POST /api/attachments** — multipart upload (one file per request, upload in parallel from the client).
+  Size cap `UPLOAD_MAX_FILE_MB` (default 100 MB, enforced by middleware + streaming write). Kind detection from
+  MIME + magic bytes (`filetype`); dangerous types (html, executables) → 422 `unsupported_file_type`.
+  Images get a Pillow-downscaled `model.jpg` derivative (max 1024 px); documents get one-time text extraction
+  (pypdf / python-docx / plain text) stored in `extracted_text`.
+- **GET /api/attachments/{id}** — metadata (owner-scoped). **GET /api/attachments/{id}/content** — owner-scoped
+  file download, `inline` for image/video/audio/pdf, `attachment` otherwise; Range supported (video scrubbing).
+- **attachments table** — id PK · user_id FK users CASCADE (idx) · conversation_id FK conversations CASCADE null ·
+  message_id FK messages CASCADE null (idx) · filename · stored_filename (server-generated) · mime_type ·
+  size_bytes · kind CHECK(image|video|audio|document|other) · extracted_text null · model_image_path null ·
+  created_at. Unbound rows older than 24 h are deleted by a daily cleanup task (startup + every 24 h).
+- **ChatSendRequest.attachment_ids** (≤10) — must be owned and unbound; bound to the message in `_prepare_exchange`
+  and committed before the LLM call. Auto-title falls back to `📷 file` / `📎 file` for caption-less messages.
+- **Prompt building** (`build_llm_messages`) — images → base64 `image_url` parts (JPEG derivative) gated by
+  `LLM_VISION_ENABLED`; documents → `[Document: name]\n{extracted_text}` (≤ `DOC_MAX_CHARS`); other → textual note.
+  Non-vision upstreams that reject image parts trigger one automatic text-only retry (send + stream).
+- **New env vars** — `UPLOAD_DIR` (uploads), `UPLOAD_MAX_FILE_MB` (100), `DOC_MAX_CHARS` (100000),
+  `LLM_VISION_ENABLED` (true), `MOCK_VISION_REPLY` ("I can see the image.").
+- **UI (Step 11)** — 📎 multi-file upload with drag-drop + paste, pending chips, Lightbox for images, inline
+  `<video>/<audio>`, download chips for documents; auth-fetched blob URLs (private attachments).
+
 ## 14. Progress Tracker
 
 Agents: update this table after each green gate.
@@ -382,3 +407,5 @@ Agents: update this table after each green gate.
 | 7 — Chat UI | done | 2026-09-06 | sidebar (Pinned/Today/Yesterday/Earlier, debounced q-search, pin/delete with confirm, active highlight), user/assistant bubbles with markdown+GFM+syntax-highlighted code+copy, regenerate (backend: stream regenerate flag replaces trailing assistant reply; system_prompt now accepted by chat API), SSE streaming via fetch with typing indicator/Stop/abort, auto-grow textarea (Enter/Shift+Enter, 16k counter), settings drawer (model select, temperature, max_tokens, system prompt — persisted, sent with requests, clear conversation). Gate green: npm build OK, vitest 22 passed, Playwright 5 passed (auth+chat), backend FULL pytest 109 passed + 1 skipped, ruff clean |
 | 8 — Profile, usage, export, polish | done | 2026-09-06 | backend export endpoint (md/json, owner-scoped, Content-Disposition; usage aggregation already S3); /profile page (account info, username edit, password change, 30-day recharts usage chart, logout); export md/json menu in chat header; toasts on actions; friendly 502/429 banners; empty + skeleton states; responsive 375px drawer; focus-visible rings; Ctrl/Cmd+K search + Ctrl/Cmd+Shift+O new chat. Gate green: backend FULL pytest 115 passed + 1 skipped, vitest 25 passed, Playwright 8 passed, build OK, ruff clean |
 | 9 — Hardening & ops | done | 2026-09-06 | security headers (nosniff/DENY/referrer-policy) + 1 MB body cap + token-free logs (tested); CORS restricted to configured origins; scripts: start_dev, build_and_run, backup_db (pg_dump, keep 14), restore_db, smoke.sh (10/10), load_test.py (50 users × 5 min: 21,358 req, 0.00% errors, p95 706 ms); systemd user unit (systemd-analyze verify OK); README. Final regression: backend pytest 119 passed + 1 skipped, vitest 25 passed, Playwright 8 passed, build OK, ruff clean |
+| 10 — Attachments backend | not started | — | |
+| 11 — Attachments UI | not started | — | |

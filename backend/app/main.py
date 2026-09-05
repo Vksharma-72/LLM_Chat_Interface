@@ -4,6 +4,8 @@ Run as:
     uv run uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 3001
 """
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,6 +29,7 @@ from app.api.errors import (
     unhandled_exception_handler,
     validation_error_handler,
 )
+from app.api.routes.attachments import router as attachments_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.conversations import router as conversations_router
@@ -35,7 +38,7 @@ from app.api.routes.users import router as users_router
 from app.core.config import ROOT_DIR, Settings, get_settings
 from app.core.http_security import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.logging import RequestIDMiddleware, configure_logging
-from app.db.session import get_engine
+from app.db.session import get_engine, get_sessionmaker
 
 
 class SPAStaticFiles(StaticFiles):
@@ -72,11 +75,32 @@ def _mount_frontend(app: FastAPI) -> None:
     )
 
 
+async def _orphan_cleanup_loop() -> None:
+    """Delete unbound attachments (24h) + orphaned files; startup + daily (§15)."""
+    from app.services.attachments import cleanup_orphans
+
+    while True:
+        try:
+            async with get_sessionmaker()() as session:
+                removed = await cleanup_orphans(session)
+            if removed:
+                logging.getLogger("app.attachments").info(
+                    "Cleaned up %d orphaned attachment(s)", removed
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.getLogger("app.attachments").exception("Attachment cleanup failed")
+        await asyncio.sleep(24 * 60 * 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Re-assert JSON logging on startup: uvicorn applies its log config after import.
     configure_logging()
+    cleanup_task = asyncio.create_task(_orphan_cleanup_loop())
     yield
+    cleanup_task.cancel()
     await get_engine().dispose()
 
 
@@ -101,9 +125,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Applied first (outermost) so hardening headers land on every response,
     # including errors emitted by the inner stack.
     app.add_middleware(SecurityHeadersMiddleware)
-    app.add_middleware(BodySizeLimitMiddleware)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        upload_max_bytes=(settings.UPLOAD_MAX_FILE_MB + 1) * 1024 * 1024,
+    )
 
     app.include_router(health_router)
+    app.include_router(attachments_router)
     app.include_router(auth_router)
     app.include_router(users_router)
     app.include_router(conversations_router)

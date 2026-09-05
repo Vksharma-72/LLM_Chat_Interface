@@ -12,6 +12,7 @@ from app.schemas.message import MessageResponse
 class ChatSendRequest(BaseModel):
     conversation_id: uuid.UUID | None = None
     content: str | None = None
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_tokens: int | None = Field(default=None, ge=1)
     model: str | None = None
@@ -35,7 +36,7 @@ class ChatSendRequest(BaseModel):
         if self.regenerate:
             if self.conversation_id is None:
                 raise ValueError("conversation_id is required when regenerating")
-        elif self.content is None:
+        elif self.content is None and not self.attachment_ids:
             raise ValueError("content is required")
         return self
 

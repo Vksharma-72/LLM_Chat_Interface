@@ -35,6 +35,9 @@ class User(Base):
     api_usage: Mapped[list["ApiUsage"]] = relationship(  # noqa: F821
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
+    attachments: Mapped[list["Attachment"]] = relationship(  # noqa: F821
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
 
     @validates("email")
     def _lowercase_email(self, _key: str, value: str | None) -> str | None:

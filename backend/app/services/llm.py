@@ -132,8 +132,8 @@ class LLMService:
 
     @staticmethod
     def _build_messages(
-        messages: Sequence[dict[str, str]], system_prompt: str | None
-    ) -> list[dict[str, str]]:
+        messages: Sequence[dict[str, Any]], system_prompt: str | None
+    ) -> list[dict[str, Any]]:
         if system_prompt and system_prompt.strip():
             return [{"role": "system", "content": system_prompt}, *messages]
         return list(messages)
@@ -176,7 +176,7 @@ class LLMService:
 
     async def chat_completion(
         self,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[dict[str, Any]],
         *,
         model: str | None = None,
         temperature: float = 0.7,
@@ -211,7 +211,7 @@ class LLMService:
 
     async def chat_completion_stream(
         self,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[dict[str, Any]],
         *,
         model: str | None = None,
         temperature: float = 0.7,

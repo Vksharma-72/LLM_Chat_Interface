@@ -32,11 +32,23 @@ class SecurityHeadersMiddleware:
 
 
 class BodySizeLimitMiddleware:
-    """Rejects requests whose declared body exceeds max_bytes with a 413 envelope."""
+    """Rejects requests whose declared body exceeds the path's cap (413 envelope).
 
-    def __init__(self, app, max_bytes: int = MAX_BODY_BYTES):
+    Normal API paths are capped at max_bytes (1 MB); file-upload paths get the
+    larger upload_max_bytes so multipart files can pass through.
+    """
+
+    def __init__(
+        self,
+        app,
+        max_bytes: int = MAX_BODY_BYTES,
+        upload_max_bytes: int | None = None,
+        upload_paths: tuple[str, ...] = ("/api/attachments",),
+    ):
         self.app = app
         self.max_bytes = max_bytes
+        self.upload_max_bytes = upload_max_bytes or max_bytes
+        self.upload_paths = upload_paths
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -44,8 +56,13 @@ class BodySizeLimitMiddleware:
             return
 
         headers = dict(scope.get("headers") or [])
+        limit = (
+            self.upload_max_bytes
+            if scope.get("path", "") in self.upload_paths
+            else self.max_bytes
+        )
         content_length = int(headers.get(b"content-length", b"0") or 0)
-        if content_length > self.max_bytes:
+        if content_length > limit:
             body = json.dumps(
                 {"error": {"code": "payload_too_large", "message": "Request body too large"}}
             ).encode("utf-8")

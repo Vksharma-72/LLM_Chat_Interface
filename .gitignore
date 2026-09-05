@@ -13,6 +13,7 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+.env.example
 
 # Frontend (Steps 6–8)
 node_modules/

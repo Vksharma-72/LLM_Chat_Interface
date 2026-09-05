@@ -189,6 +189,10 @@ class MessageRepository:
         )
         return list(result.scalars().all())
 
+    async def delete_message(self, message: Message) -> None:
+        await self.session.delete(message)
+        await self.session.flush()
+
 
 class ApiUsageRepository:
     def __init__(self, session: AsyncSession) -> None:

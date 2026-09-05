@@ -96,22 +96,48 @@ async def _persist_assistant(
     model: str,
     temperature: float,
     max_tokens: int,
+    system_prompt: str | None,
 ) -> Message:
+    metadata: dict[str, object] = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if system_prompt:
+        metadata["system_prompt"] = system_prompt
     assistant = await MessageRepository(db).append(
         conversation_id,
         role="assistant",
         content=content,
         tokens=usage["completion_tokens"] if usage else None,
-        metadata={
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        },
+        metadata=metadata,
     )
     await ApiUsageRepository(db).increment(
         user_id, tokens=usage["completion_tokens"] if usage else 0, requests=1
     )
     return assistant
+
+
+async def _prepare_regeneration(
+    db: AsyncSession, user: User, body: ChatSendRequest
+) -> tuple[Conversation, Message, str]:
+    """Drop the trailing assistant reply; return the last user message as prompt."""
+    assert body.conversation_id is not None  # guaranteed by ChatSendRequest
+    conversation = await ConversationRepository(db).get(body.conversation_id)
+    if conversation is None or conversation.user_id != user.id:
+        raise ApiError(404, "not_found", "Conversation not found")
+
+    repo = MessageRepository(db)
+    messages = await repo.list_for_conversation(conversation.id)
+    if messages and messages[-1].role == "assistant":
+        await repo.delete_message(messages[-1])
+        messages = messages[:-1]
+        await db.commit()  # old reply is gone before the re-stream starts
+
+    last_user = next((m for m in reversed(messages) if m.role == "user"), None)
+    if last_user is None:
+        raise ApiError(422, "validation_error", "Nothing to regenerate")
+    return conversation, last_user, last_user.content
 
 
 def _stream_error(code: str, message: str) -> dict[str, str]:
@@ -127,16 +153,21 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
     service=Depends(get_llm_service),
 ) -> ChatSendResponse:
+    if body.regenerate:
+        raise ApiError(
+            422, "validation_error", "Regeneration is only supported on /api/chat/stream"
+        )
     conversation, user_message = await _prepare_exchange(db, user, body)
     temperature = body.temperature if body.temperature is not None else DEFAULT_TEMPERATURE
     max_tokens = body.max_tokens if body.max_tokens is not None else DEFAULT_MAX_TOKENS
 
     try:
         result = await service.chat_completion(
-            [{"role": "user", "content": body.content}],
+            [{"role": "user", "content": body.content or ""}],
             model=body.model,
             temperature=temperature,
             max_tokens=max_tokens,
+            system_prompt=body.system_prompt,
         )
     except (LLMRateLimited, LLMBadResponse, LLMUnavailable) as exc:
         raise _llm_failure(exc) from exc
@@ -150,6 +181,7 @@ async def send_message(
         model=result["model"],
         temperature=temperature,
         max_tokens=max_tokens,
+        system_prompt=body.system_prompt,
     )
     await db.refresh(conversation)
     return ChatSendResponse(
@@ -168,12 +200,25 @@ async def stream_message(
     db: AsyncSession = Depends(get_db),
     service=Depends(get_llm_service),
 ) -> EventSourceResponse:
-    conversation, user_message = await _prepare_exchange(db, user, body)
+    if body.regenerate:
+        conversation, user_message, prompt_content = await _prepare_regeneration(db, user, body)
+    else:
+        conversation, user_message = await _prepare_exchange(db, user, body)
+        prompt_content = body.content or ""
     temperature = body.temperature if body.temperature is not None else DEFAULT_TEMPERATURE
     max_tokens = body.max_tokens if body.max_tokens is not None else DEFAULT_MAX_TOKENS
 
     return EventSourceResponse(
-        _chat_stream_events(service, user.id, conversation, user_message, body, temperature, max_tokens)
+        _chat_stream_events(
+            service,
+            user.id,
+            conversation,
+            user_message,
+            prompt_content,
+            body,
+            temperature,
+            max_tokens,
+        )
     )
 
 
@@ -182,6 +227,7 @@ async def _chat_stream_events(
     user_id: uuid.UUID,
     conversation: Conversation,
     user_message: Message,
+    prompt_content: str,
     body: ChatSendRequest,
     temperature: float,
     max_tokens: int,
@@ -207,10 +253,11 @@ async def _chat_stream_events(
     session = get_sessionmaker()()
     try:
         async for event in service.chat_completion_stream(
-            [{"role": "user", "content": body.content}],
+            [{"role": "user", "content": prompt_content}],
             model=body.model,
             temperature=temperature,
             max_tokens=max_tokens,
+            system_prompt=body.system_prompt,
         ):
             if event["type"] == "delta":
                 parts.append(event["content"])
@@ -232,6 +279,7 @@ async def _chat_stream_events(
                         model=model_used or "unknown",
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        system_prompt=body.system_prompt,
                     )
                 yield {
                     "event": "done",

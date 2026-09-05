@@ -10,16 +10,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.errors import (
     ApiError,
     api_error_handler,
     http_exception_handler,
+    rate_limit_exceeded_handler,
     unhandled_exception_handler,
     validation_error_handler,
 )
 from app.api.routes.auth import router as auth_router
+from app.api.routes.chat import router as chat_router
+from app.api.routes.conversations import router as conversations_router
 from app.api.routes.health import router as health_router
 from app.api.routes.users import router as users_router
 from app.core.config import Settings, get_settings
@@ -57,11 +61,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(users_router)
+    app.include_router(conversations_router)
+    app.include_router(chat_router)
 
     # Every error leaves as {"error": {"code", "message"}} (§7, §10).
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)
     return app
 

@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,7 @@ async def get_redis() -> AsyncIterator[Redis]:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -54,4 +55,5 @@ async def get_current_user(
     user = await UserRepository(db).get_by_id(user_id)
     if user is None or not user.is_active:
         raise ApiError(401, "invalid_token", "Invalid token")
+    request.state.user_id = str(user.id)  # used by the rate-limiter key func
     return user

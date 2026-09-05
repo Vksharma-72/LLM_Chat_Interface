@@ -2,11 +2,12 @@
 
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.api.errors import ApiError
+from app.core.limiter import api_limit, limiter, user_key
 from app.db.repositories import ApiUsageRepository, UserRepository
 from app.models import User
 from app.schemas.auth import UserResponse
@@ -17,12 +18,15 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(user: User = Depends(get_current_user)) -> User:
+@limiter.limit(api_limit, key_func=user_key)
+async def get_me(request: Request, user: User = Depends(get_current_user)) -> User:
     return user
 
 
 @router.put("/me", response_model=UserResponse)
+@limiter.limit(api_limit, key_func=user_key)
 async def update_me(
+    request: Request,
     body: UserUpdateRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -37,7 +41,9 @@ async def update_me(
 
 
 @router.put("/me/password", status_code=204)
+@limiter.limit(api_limit, key_func=user_key)
 async def change_password(
+    request: Request,
     body: PasswordChangeRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -49,7 +55,9 @@ async def change_password(
 
 
 @router.get("/usage", response_model=UsageResponse)
+@limiter.limit(api_limit, key_func=user_key)
 async def get_usage(
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> UsageResponse:

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_redis
 from app.api.errors import ApiError
 from app.core.config import get_settings
+from app.core.limiter import api_limit, limiter, user_key
 from app.db.base import utcnow
 from app.db.repositories import RefreshTokenRepository, UserRepository
 from app.models import User
@@ -56,7 +57,10 @@ def _decode_refresh_token(token: str) -> dict:
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
-async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+@limiter.limit(api_limit, key_func=user_key)
+async def register(
+    request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)
+) -> AuthResponse:
     settings = get_settings()
     if not settings.REGISTRATION_ENABLED:
         raise ApiError(403, "registration_disabled", "Registration is currently disabled")
@@ -81,6 +85,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) ->
 
 
 @router.post("/login", response_model=AuthResponse)
+@limiter.limit(api_limit, key_func=user_key)
 async def login(
     request: Request,
     body: LoginRequest,
@@ -106,7 +111,10 @@ async def login(
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh(body: TokenRequest, db: AsyncSession = Depends(get_db)) -> RefreshResponse:
+@limiter.limit(api_limit, key_func=user_key)
+async def refresh(
+    request: Request, body: TokenRequest, db: AsyncSession = Depends(get_db)
+) -> RefreshResponse:
     payload = _decode_refresh_token(body.refresh_token)
     user_id = user_id_from_payload(payload)
 
@@ -130,11 +138,15 @@ async def refresh(body: TokenRequest, db: AsyncSession = Depends(get_db)) -> Ref
 
 
 @router.post("/logout", status_code=204)
-async def logout(body: TokenRequest, db: AsyncSession = Depends(get_db)) -> None:
+@limiter.limit(api_limit, key_func=user_key)
+async def logout(
+    request: Request, body: TokenRequest, db: AsyncSession = Depends(get_db)
+) -> None:
     payload = _decode_refresh_token(body.refresh_token)
     await RefreshTokenRepository(db).revoke(str(payload.get("jti", "")))
 
 
 @router.get("/me", response_model=UserResponse)
-async def auth_me(user: User = Depends(get_current_user)) -> User:
+@limiter.limit(api_limit, key_func=user_key)
+async def auth_me(request: Request, user: User = Depends(get_current_user)) -> User:
     return user

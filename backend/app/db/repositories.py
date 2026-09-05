@@ -7,10 +7,11 @@ Repositories never commit — transaction boundaries belong to the caller
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,9 +91,23 @@ class ConversationRepository:
         *,
         limit: int = 50,
         offset: int = 0,
+        q: str | None = None,
     ) -> tuple[list[Conversation], int]:
-        """A user's conversations, pinned first then updated_at desc (§7), with total."""
+        """A user's conversations, pinned first then updated_at desc (§7), with total.
+
+        `q` case-insensitively filters over conversation titles AND message content.
+        """
         base = select(Conversation).where(Conversation.user_id == user_id)
+        if q:
+            pattern = f"%{q}%"
+            base = base.where(
+                or_(
+                    Conversation.title.ilike(pattern),
+                    Conversation.id.in_(
+                        select(Message.conversation_id).where(Message.content.ilike(pattern))
+                    ),
+                )
+            )
         total = (
             await self.session.execute(select(func.count()).select_from(base.subquery()))
         ).scalar_one()
@@ -102,6 +117,18 @@ class ConversationRepository:
             .offset(offset)
         )
         return list(result.scalars().all()), total
+
+    async def message_counts(
+        self, conversation_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        if not conversation_ids:
+            return {}
+        rows = await self.session.execute(
+            select(Message.conversation_id, func.count(Message.id))
+            .where(Message.conversation_id.in_(conversation_ids))
+            .group_by(Message.conversation_id)
+        )
+        return {conversation_id: count for conversation_id, count in rows.all()}
 
     async def update(
         self,

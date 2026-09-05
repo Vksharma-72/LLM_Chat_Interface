@@ -1,3 +1,7 @@
+import type { Attachment } from "./attachments";
+
+export type { Attachment };
+
 export interface Conversation {
   id: string;
   title: string;
@@ -17,6 +21,7 @@ export interface Message {
   content: string;
   tokens: number | null;
   metadata: Record<string, unknown>;
+  attachments: Attachment[];
   created_at: string;
 }
 

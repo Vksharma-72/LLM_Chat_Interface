@@ -19,6 +19,7 @@ export default defineConfig({
       url: "http://localhost:8001/v1/models",
       reuseExistingServer: true,
       timeout: 30_000,
+      stdout: "pipe",
     },
     {
       command:
@@ -26,9 +27,9 @@ export default defineConfig({
         "DATABASE_URL=postgresql+asyncpg://llmchat:llmchat@localhost:5432/llmchat_test " +
         "REDIS_URL=redis://localhost:6379/1 " +
         "LLM_API_URL=http://localhost:8001/v1 " +
-        "uv run uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 3001",
-      url: "http://localhost:3001/health",
-      reuseExistingServer: true,
+        "uv run --no-sync uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 3102",
+      url: "http://localhost:3102/health",
+      reuseExistingServer: false,
       timeout: 30_000,
     },
     {
@@ -36,6 +37,7 @@ export default defineConfig({
       url: "http://localhost:5173",
       reuseExistingServer: true,
       timeout: 60_000,
+      env: { VITE_API_PROXY: "http://localhost:3102" },
     },
   ],
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

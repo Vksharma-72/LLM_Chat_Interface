@@ -86,6 +86,8 @@ def _chunk(model: str, piece: str, finish_reason: str | None) -> str:
 
 async def _stream_events(body: dict[str, Any]) -> AsyncIterator[str]:
     reply = settings.MOCK_LLM_REPLY
+    if any(_has_image_part(message) for message in body.get("messages", [])):
+        reply = settings.MOCK_VISION_REPLY
     model = body.get("model") or MOCK_MODEL_ID
     usage = _usage(body, reply)
 

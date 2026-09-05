@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { api, getErrorMessage } from "../services/api";
 import { streamChat } from "../services/chat";
 import type { StreamEvent } from "../services/chat";
-import type { Conversation, Message, StreamError, Usage } from "../types/chat";
+import type { Attachment, Conversation, Message, StreamError, Usage } from "../types/chat";
 
 export interface SendParams {
   model?: string | null;
@@ -10,6 +10,8 @@ export interface SendParams {
   maxTokens?: number;
   systemPrompt?: string | null;
 }
+
+
 
 /** Pure reducer for SSE events — unit-tested in isolation (§9). */
 export interface StreamAccumulator {
@@ -52,7 +54,7 @@ interface ChatState {
   loadConversations: (q?: string) => Promise<void>;
   openConversation: (id: string) => Promise<void>;
   newConversation: () => void;
-  send: (content: string, params?: SendParams) => Promise<void>;
+  send: (content: string, params?: SendParams, attachments?: Attachment[]) => Promise<void>;
   regenerate: (params?: SendParams) => Promise<void>;
   abort: () => void;
   deleteConversation: (id: string) => Promise<void>;
@@ -104,7 +106,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
 
   newConversation: () => set({ currentId: null, messages: [], error: null }),
 
-  send: async (content, params = {}) => {
+  send: async (content, params = {}, attachments: Attachment[] = []) => {
     const state = get();
     if (state.isStreaming) {
       return;
@@ -120,6 +122,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
       content,
       tokens: null,
       metadata: {},
+      attachments,
       created_at: new Date().toISOString(),
     };
     set({ messages: [...state.messages, optimistic] });
@@ -137,6 +140,7 @@ export const useChatStore = create<ChatState>()((set, get) => ({
         {
           conversation_id: state.currentId,
           content,
+          attachment_ids: attachments.map((attachment) => attachment.id),
           model: params.model ?? null,
           temperature: params.temperature,
           max_tokens: params.maxTokens,

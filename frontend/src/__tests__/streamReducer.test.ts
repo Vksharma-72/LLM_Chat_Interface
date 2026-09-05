@@ -9,6 +9,7 @@ const userMessage: Message = {
   content: "hello",
   tokens: null,
   metadata: {},
+  attachments: [],
   created_at: "2026-09-06T10:00:00Z",
 };
 
@@ -19,6 +20,7 @@ const assistantMessage: Message = {
   content: "hi there",
   tokens: 3,
   metadata: { model: "test-model" },
+  attachments: [],
   created_at: "2026-09-06T10:00:01Z",
 };
 

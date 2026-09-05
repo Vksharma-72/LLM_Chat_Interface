@@ -4,6 +4,7 @@ import type { Message, Usage } from "../types/chat";
 export interface ChatStreamRequestBody {
   conversation_id?: string | null;
   content?: string;
+  attachment_ids?: string[];
   regenerate?: boolean;
   temperature?: number;
   max_tokens?: number;

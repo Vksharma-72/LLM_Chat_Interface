@@ -7,6 +7,7 @@ import SettingsDrawer from "../components/SettingsDrawer";
 import Sidebar from "../components/Sidebar";
 import ThemeToggle from "../components/ThemeToggle";
 import { useToast } from "../components/Toast";
+import { useAttachmentUpload } from "../hooks/useAttachmentUpload";
 import { useChat } from "../hooks/useChat";
 import { friendlyError } from "../lib/friendlyError";
 import { api, getErrorMessage } from "../services/api";
@@ -19,6 +20,7 @@ export default function ChatPage() {
   const logout = useAuthStore((state) => state.logout);
 
   const chat = useChat();
+  const { pending, addFiles, removePending, reset } = useAttachmentUpload();
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
@@ -121,7 +123,16 @@ export default function ChatPage() {
         <Sidebar onDelete={(id) => setConfirmDelete(id)} />
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main
+        className="flex min-w-0 flex-1 flex-col"
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (event.dataTransfer.files.length > 0) {
+            void addFiles(event.dataTransfer.files);
+          }
+        }}
+      >
         <header className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 dark:border-gray-800">
           <button
             type="button"
@@ -207,7 +218,17 @@ export default function ChatPage() {
         <ChatInput
           disabled={chat.isStreaming}
           isStreaming={chat.isStreaming}
-          onSend={chat.send}
+          pending={pending}
+          addFiles={addFiles}
+          removePending={removePending}
+          onSend={(content, attachmentIds) => {
+            const ready = pending
+              .map((entry) => entry.attachment)
+              .filter((attachment) => attachment !== undefined)
+              .filter((attachment) => attachmentIds.includes(attachment.id));
+            void chat.send(content, ready);
+            reset();
+          }}
           onStop={chat.abort}
         />
       </main>

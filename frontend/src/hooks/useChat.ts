@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useChatStore } from "../stores/chatStore";
 import type { SendParams } from "../stores/chatStore";
 import { useUiStore } from "../stores/uiStore";
+import type { Attachment } from "../types/attachments";
 
 /**
  * Glue between the chat store and the persisted settings drawer values:
@@ -22,7 +23,8 @@ export function useChat() {
   );
 
   const send = useCallback(
-    (content: string) => useChatStore.getState().send(content, withSettings()),
+    (content: string, attachments: Attachment[] = []) =>
+      useChatStore.getState().send(content, withSettings(), attachments),
     [withSettings]
   );
   const regenerate = useCallback(

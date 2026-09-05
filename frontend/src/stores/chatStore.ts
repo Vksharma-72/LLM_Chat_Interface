@@ -46,6 +46,9 @@ interface ChatState {
   isStreaming: boolean;
   streamingContent: string;
   error: string | null;
+  errorCode: string | null;
+  isLoadingConversation: boolean;
+  isLoadingList: boolean;
   loadConversations: (q?: string) => Promise<void>;
   openConversation: (id: string) => Promise<void>;
   newConversation: () => void;
@@ -69,22 +72,34 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   isStreaming: false,
   streamingContent: "",
   error: null,
+  errorCode: null,
+  isLoadingConversation: false,
+  isLoadingList: false,
 
   loadConversations: async (q?: string) => {
     const query = q ?? get().query;
-    set({ query });
-    const response = await api.get<{ items: Conversation[]; total: number }>(
-      "/conversations",
-      { params: query ? { q: query } : undefined }
-    );
-    set({ conversations: response.data.items, total: response.data.total });
+    set({ query, isLoadingList: true });
+    try {
+      const response = await api.get<{ items: Conversation[]; total: number }>(
+        "/conversations",
+        { params: query ? { q: query } : undefined }
+      );
+      set({ conversations: response.data.items, total: response.data.total });
+    } finally {
+      set({ isLoadingList: false });
+    }
   },
 
   openConversation: async (id) => {
-    const response = await api.get<{ conversation: Conversation; messages: Message[] }>(
-      `/conversations/${id}`
-    );
-    set({ currentId: id, messages: response.data.messages, error: null });
+    set({ isLoadingConversation: true });
+    try {
+      const response = await api.get<{ conversation: Conversation; messages: Message[] }>(
+        `/conversations/${id}`
+      );
+      set({ currentId: id, messages: response.data.messages, error: null });
+    } finally {
+      set({ isLoadingConversation: false });
+    }
   },
 
   newConversation: () => set({ currentId: null, messages: [], error: null }),
@@ -146,14 +161,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             }));
             void get().loadConversations();
           } else if (event.type === "error") {
-            set({ error: event.message });
+            set({ error: event.message, errorCode: event.code });
           }
         },
         abortController.signal
       );
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
-        set({ error: getErrorMessage(err) });
+        set({ error: getErrorMessage(err), errorCode: null });
       }
     } finally {
       set({ isStreaming: false, streamingContent: "" });
@@ -207,14 +222,14 @@ export const useChatStore = create<ChatState>()((set, get) => ({
             }));
             void get().loadConversations();
           } else if (event.type === "error") {
-            set({ error: event.message });
+            set({ error: event.message, errorCode: event.code });
           }
         },
         abortController.signal
       );
     } catch (err) {
       if ((err as Error)?.name !== "AbortError") {
-        set({ error: getErrorMessage(err) });
+        set({ error: getErrorMessage(err), errorCode: null });
       }
     } finally {
       set({ isStreaming: false, streamingContent: "" });

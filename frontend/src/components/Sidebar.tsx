@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useDebounce } from "../hooks/useDebounce";
+import { useToast } from "./Toast";
 import { groupConversations } from "../lib/groupConversations";
 import type { Conversation } from "../types/chat";
 
@@ -15,6 +16,8 @@ export default function Sidebar({ onDelete }: SidebarProps) {
   const openConversation = useChatStore((state) => state.openConversation);
   const togglePin = useChatStore((state) => state.togglePin);
   const loadConversations = useChatStore((state) => state.loadConversations);
+  const isLoadingList = useChatStore((state) => state.isLoadingList);
+  const { push } = useToast();
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -24,6 +27,14 @@ export default function Sidebar({ onDelete }: SidebarProps) {
   }, [debouncedSearch, loadConversations]);
 
   const groups = groupConversations(conversations);
+
+  const handleTogglePin = async (conversation: Conversation) => {
+    await togglePin(conversation.id);
+    push(
+      conversation.is_pinned ? "Conversation unpinned" : "Conversation pinned",
+      "info"
+    );
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -36,40 +47,53 @@ export default function Sidebar({ onDelete }: SidebarProps) {
           New chat
         </button>
         <input
+          id="conversation-search"
           type="search"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search conversations…"
+          placeholder="Search conversations… (Ctrl+K)"
           aria-label="Search conversations"
           className="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-3" aria-label="Conversations">
-        {groups.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-            No conversations yet.
-          </p>
-        )}
-        {groups.map((group) => (
-          <div key={group.label} className="mb-3">
-            <h3 className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {group.label}
-            </h3>
-            <ul>
-              {group.items.map((conversation) => (
-                <ConversationItem
-                  key={conversation.id}
-                  conversation={conversation}
-                  active={conversation.id === currentId}
-                  onOpen={() => void openConversation(conversation.id)}
-                  onTogglePin={() => void togglePin(conversation.id)}
-                  onDelete={() => onDelete(conversation.id)}
-                />
-              ))}
-            </ul>
+        {isLoadingList && conversations.length === 0 ? (
+          <div className="space-y-2 px-1" aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <div
+                key={index}
+                className="h-9 animate-pulse rounded-md bg-gray-200 dark:bg-gray-800"
+              />
+            ))}
           </div>
-        ))}
+        ) : groups.length === 0 ? (
+          <p className="px-3 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            {debouncedSearch.trim()
+              ? "No conversations match your search."
+              : "No conversations yet."}
+          </p>
+        ) : (
+          groups.map((group) => (
+            <div key={group.label} className="mb-3">
+              <h3 className="px-3 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {group.label}
+              </h3>
+              <ul>
+                {group.items.map((conversation) => (
+                  <ConversationItem
+                    key={conversation.id}
+                    conversation={conversation}
+                    active={conversation.id === currentId}
+                    onOpen={() => void openConversation(conversation.id)}
+                    onTogglePin={() => void handleTogglePin(conversation)}
+                    onDelete={() => onDelete(conversation.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
       </nav>
     </div>
   );

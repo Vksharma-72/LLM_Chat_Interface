@@ -13,6 +13,7 @@ interface AuthState {
   /** Rotate tokens; returns the new access token, or null on failure. */
   refresh: () => Promise<string | null>;
   fetchMe: () => Promise<User | null>;
+  setUser: (user: User) => void;
   clear: () => void;
 }
 
@@ -82,6 +83,8 @@ export const useAuthStore = create<AuthState>()(
           return null;
         }
       },
+
+      setUser: (user) => set({ user }),
 
       clear: () => set({ user: null, accessToken: null, refreshToken: null }),
     }),

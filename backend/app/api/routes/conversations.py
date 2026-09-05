@@ -1,9 +1,12 @@
 """Conversation CRUD endpoints (§7) — owner-scoped, foreign ids return 404."""
 
+import json
+import re
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -110,3 +113,55 @@ async def delete_conversation(
 ) -> None:
     conversation = await _get_owned_conversation(conversation_id, user, db)
     await ConversationRepository(db).delete(conversation)
+
+
+def _safe_filename(title: str, extension: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", title).strip("-")[:80]
+    return f"{slug or 'conversation'}.{extension}"
+
+
+@router.get("/{conversation_id}/export")
+@limiter.limit(api_limit, key_func=user_key)
+async def export_conversation(
+    request: Request,
+    conversation_id: uuid.UUID,
+    format: Annotated[str, Query(pattern="^(md|json)$")] = "md",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Download the conversation as markdown or JSON (§7, S8)."""
+    conversation = await _get_owned_conversation(conversation_id, user, db)
+    messages = await MessageRepository(db).list_for_conversation(conversation_id)
+
+    if format == "json":
+        payload = {
+            "title": conversation.title,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "messages": [
+                MessageResponse.from_model(message).model_dump(mode="json")
+                for message in messages
+            ],
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        media_type = "application/json"
+        extension = "json"
+    else:
+        role_labels = {"user": "User", "assistant": "Assistant", "system": "System"}
+        lines = [f"# {conversation.title}", ""]
+        for message in messages:
+            lines.append(f"**{role_labels.get(message.role, message.role)}:**")
+            lines.append(message.content)
+            lines.append("")
+        content = "\n".join(lines)
+        media_type = "text/markdown; charset=utf-8"
+        extension = "md"
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_safe_filename(conversation.title, extension)}"'
+            )
+        },
+    )

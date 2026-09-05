@@ -1,12 +1,15 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import ChatInput from "../components/ChatInput";
 import ConfirmDialog from "../components/ConfirmDialog";
 import MessageList from "../components/MessageList";
 import SettingsDrawer from "../components/SettingsDrawer";
 import Sidebar from "../components/Sidebar";
 import ThemeToggle from "../components/ThemeToggle";
+import { useToast } from "../components/Toast";
 import { useChat } from "../hooks/useChat";
+import { friendlyError } from "../lib/friendlyError";
+import { api, getErrorMessage } from "../services/api";
 import { useAuthStore } from "../stores/authStore";
 import { useUiStore } from "../stores/uiStore";
 
@@ -18,15 +21,41 @@ export default function ChatPage() {
   const chat = useChat();
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
   const settingsOpen = useUiStore((state) => state.settingsOpen);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
+  const { push } = useToast();
 
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const currentTitle =
     chat.conversations.find((conversation) => conversation.id === chat.currentId)?.title ??
     "New chat";
+
+  // Shortcuts: Ctrl/Cmd+K → search, Ctrl/Cmd+Shift+O → new chat (§8).
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const mod = event.ctrlKey || event.metaKey;
+      if (!mod) {
+        return;
+      }
+      if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSidebarOpen(true);
+        requestAnimationFrame(() => {
+          document.getElementById("conversation-search")?.focus();
+        });
+      } else if (event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        chat.newConversation();
+        push("Started a new chat", "info");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [chat, setSidebarOpen, push]);
 
   const handleLogout = async () => {
     await logout();
@@ -36,6 +65,7 @@ export default function ChatPage() {
   const handleDeleteConfirm = async () => {
     if (confirmDelete) {
       await chat.deleteConversation(confirmDelete);
+      push("Conversation deleted");
     }
     setConfirmDelete(null);
   };
@@ -43,6 +73,34 @@ export default function ChatPage() {
   const handleClearConfirm = async () => {
     await chat.clearCurrent();
     setConfirmClear(false);
+    push("Conversation cleared");
+  };
+
+  const handleExport = async (format: "md" | "json") => {
+    setExportOpen(false);
+    if (!chat.currentId) {
+      return;
+    }
+    try {
+      const response = await api.get(`/conversations/${chat.currentId}/export`, {
+        params: { format },
+        responseType: "blob",
+      });
+      const disposition = (response.headers["content-disposition"] as string | undefined) ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? `conversation.${format}`;
+      const url = URL.createObjectURL(response.data as Blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      push("Conversation exported");
+    } catch (err) {
+      push(getErrorMessage(err), "error");
+    }
   };
 
   return (
@@ -64,7 +122,7 @@ export default function ChatPage() {
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+        <header className="flex items-center gap-2 px-3 py-3 sm:gap-3 sm:px-4 dark:border-gray-800">
           <button
             type="button"
             onClick={toggleSidebar}
@@ -74,30 +132,67 @@ export default function ChatPage() {
             ☰
           </button>
           <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{currentTitle}</h1>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setExportOpen((open) => !open)}
+              disabled={!chat.currentId}
+              aria-label="Export conversation"
+              aria-haspopup="menu"
+              className="rounded-md border border-gray-300 px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700"
+            >
+              ⬇️ <span className="hidden sm:inline">Export</span>
+            </button>
+            {exportOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-md border border-gray-200 bg-white text-sm shadow-lg dark:border-gray-800 dark:bg-gray-900"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExport("md")}
+                  className="block w-full px-3 py-2 text-left text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+                >
+                  Markdown (.md)
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void handleExport("json")}
+                  className="block w-full px-3 py-2 text-left text-gray-900 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800"
+                >
+                  JSON (.json)
+                </button>
+              </div>
+            )}
+          </div>
+
+          <Link
+            to="/profile"
+            aria-label="Open profile"
+            className="rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-700"
+          >
+            👤 <span className="hidden sm:inline">Profile</span>
+          </Link>
           <ThemeToggle />
           <button
             type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Open settings"
-            className="rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-700"
-          >
-            ⚙️
-          </button>
-          <button
-            type="button"
             onClick={handleLogout}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
-            Log out
+            <span aria-hidden="true">⏻</span>
+            <span className="sr-only sm:not-sr-only sm:ml-1">Log out</span>
           </button>
         </header>
 
         {chat.error && (
           <div
             role="alert"
-            className="mx-4 mt-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300"
+            className="mx-4 mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
           >
-            {chat.error}
+            {friendlyError(chat.errorCode, chat.error)}
           </div>
         )}
 
@@ -105,6 +200,7 @@ export default function ChatPage() {
           messages={chat.messages}
           isStreaming={chat.isStreaming}
           streamingContent={chat.streamingContent}
+          isLoading={chat.isLoadingConversation}
           onRegenerate={chat.regenerate}
         />
 

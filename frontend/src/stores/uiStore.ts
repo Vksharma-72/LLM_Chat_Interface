@@ -17,6 +17,7 @@ interface UiState {
   settings: ChatSettings;
   toggleTheme: () => void;
   toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   updateSettings: (patch: Partial<ChatSettings>) => void;
 }
@@ -24,7 +25,7 @@ interface UiState {
 export const useUiStore = create<UiState>()(
   persist(
     (set) => ({
-      sidebarOpen: true,
+      sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 768 : true,
       settingsOpen: false,
       theme: "light",
       settings: {
@@ -35,6 +36,7 @@ export const useUiStore = create<UiState>()(
       },
       toggleTheme: () => set((state) => ({ theme: state.theme === "dark" ? "light" : "dark" })),
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       updateSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
     }),

@@ -4,6 +4,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import PublicOnly from "./components/PublicOnly";
 import ChatPage from "./pages/ChatPage";
 import LoginPage from "./pages/LoginPage";
+import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import { useUiStore } from "./stores/uiStore";
 
@@ -37,6 +38,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ChatPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <ProfilePage />
           </ProtectedRoute>
         }
       />

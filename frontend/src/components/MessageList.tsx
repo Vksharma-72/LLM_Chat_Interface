@@ -6,6 +6,7 @@ interface MessageListProps {
   messages: import("../types/chat").Message[];
   isStreaming: boolean;
   streamingContent: string;
+  isLoading: boolean;
   onRegenerate: () => void;
 }
 
@@ -13,6 +14,7 @@ export default function MessageList({
   messages,
   isStreaming,
   streamingContent,
+  isLoading,
   onRegenerate,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -46,7 +48,20 @@ export default function MessageList({
       onScroll={handleScroll}
       className="flex-1 space-y-4 overflow-y-auto px-4 py-6"
     >
-      {messages.length === 0 && !isStreaming && (
+      {isLoading && messages.length === 0 && (
+        <div className="space-y-4" aria-hidden="true">
+          {[80, 60, 70].map((widthPercent, index) => (
+            <div
+              key={index}
+              className={`h-10 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-800 ${
+                index % 2 === 0 ? "mr-auto" : "ml-auto"
+              }`}
+              style={{ width: `${widthPercent}%` }}
+            />
+          ))}
+        </div>
+      )}
+      {messages.length === 0 && !isStreaming && !isLoading && (
         <div className="flex h-full items-center justify-center">
           <p className="text-center text-gray-500 dark:text-gray-400">
             Start a conversation — type a message below.

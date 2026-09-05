@@ -15,14 +15,15 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "cd .. && uv run python scripts/mock_llm_server.py",
+      command: "cd .. && UV_NO_SYNC=1 uv run python scripts/mock_llm_server.py",
       url: "http://localhost:8001/v1/models",
       reuseExistingServer: true,
       timeout: 30_000,
     },
     {
       command:
-        "cd .. && DATABASE_URL=postgresql+asyncpg://llmchat:llmchat@localhost:5432/llmchat_test " +
+        "cd .. && UV_NO_SYNC=1 " +
+        "DATABASE_URL=postgresql+asyncpg://llmchat:llmchat@localhost:5432/llmchat_test " +
         "REDIS_URL=redis://localhost:6379/1 " +
         "LLM_API_URL=http://localhost:8001/v1 " +
         "uv run uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 3001",

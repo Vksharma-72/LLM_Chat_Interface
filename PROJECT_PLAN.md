@@ -374,7 +374,7 @@ Agents: update this table after each green gate.
 | Step | Status | Date | Notes |
 |---|---|---|---|
 | 1 — Scaffold, tooling & services | done | 2026-09-05 | PostgreSQL 16 + Redis 7 installed (apt); role/db `llmchat`+`llmchat_test` created; uv deps + lock; app factory with CORS, JSON request-ID logging, `/health`. Gate green: pytest 5 passed, `/health` 200 on :3001, ruff clean, `pg_isready` + `redis-cli ping` OK |
-| 2 — Database layer | not started | — | |
+| 2 — Database layer | done | 2026-09-05 | 5 models per §6 (UUID PKs, timestamptz, cascades, indexes), async engine/sessionmaker, Alembic async env (reads app config; `-x db=test`), initial migration `5aa2aa03baa3` applied to BOTH DBs, typed repositories + usage upsert. Gate green: alembic upgrade head OK ×2, FULL pytest 31 passed, ruff clean |
 | 3 — Auth & users | not started | — | |
 | 4 — LLM gateway + mock | not started | — | |
 | 5 — Conversations + chat API | not started | — | |

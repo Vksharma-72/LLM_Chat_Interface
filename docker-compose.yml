@@ -1,0 +1,73 @@
+# LLM Chat Interface — full stack: app (API + built frontend), PostgreSQL, Redis.
+#
+# Usage on the deployment machine:
+#   1. Copy the repo + your .env (see .env.example). Required in .env:
+#        JWT_SECRET=<64 hex chars>
+#      If the LLM (llama.cpp) runs on the Docker *host*, also set:
+#        LLM_API_URL=http://host.docker.internal:8080/v1
+#   2. docker compose up -d --build
+#   3. Open http://<host>:3001 — the first registered user becomes admin.
+#
+# DATABASE_URL / REDIS_URL / APP_* here override the same keys in .env, so the
+# containers always talk to the db/redis services, never to localhost.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: llmchat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llmchat}
+      POSTGRES_DB: llmchat
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmchat -d llmchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build: .
+    # env_file supplies JWT_SECRET, LLM_*, rate limits, feature flags from .env;
+    # the environment block below then overrides the data-store/app keys.
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      DATABASE_URL: postgresql+asyncpg://llmchat:${POSTGRES_PASSWORD:-llmchat}@db:5432/llmchat
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required — set it in .env}
+    ports:
+      - "${APP_PORT:-3001}:3001"
+    volumes:
+      - uploads:/srv/llmchat/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    # Lets LLM_API_URL=http://host.docker.internal:8080/v1 reach a llama.cpp
+    # server running on the Docker host (works on Docker Desktop and Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  pgdata:
+  uploads:

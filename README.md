@@ -119,6 +119,28 @@ journalctl --user -u llm-chat -f         # JSON logs live here
 The unit applies migrations on start and restarts on failure. Adjust
 `WorkingDirectory` if the project lives elsewhere.
 
+### Docker Compose (any machine)
+
+Runs the whole stack — app (API + built frontend), PostgreSQL 16, Redis 7 —
+with no local Python or Node install required:
+
+```bash
+git clone https://github.com/Vksharma-72/LLM_Chat_Interface.git
+cd LLM_Chat_Interface
+cp .env.example .env
+# in .env: set JWT_SECRET (python3 -c "import secrets; print(secrets.token_hex(32))")
+#          and if llama.cpp runs on the same host:
+#          LLM_API_URL=http://host.docker.internal:8080/v1
+docker compose up -d --build
+docker compose logs -f app          # migrations run on every app start
+```
+
+The app listens on `:3001` (change with `APP_PORT` in `.env`). Database and
+uploaded files live in the `pgdata` / `uploads` named volumes; migrations are
+applied automatically before each start. Stop with `docker compose down`
+(add `-v` to also erase the database). Point Cloudflare/nginx at
+`http://<host>:3001` as with the bare-metal setup.
+
 ## Attachments
 
 Users attach files via the 📎 picker, drag-and-drop, or clipboard paste.
